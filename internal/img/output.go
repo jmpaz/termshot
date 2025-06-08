@@ -323,8 +323,9 @@ func (s *Scaffold) mapStandardColor(r, g, b int) (color.Color, bool) {
 		return nil, false
 	}
 
-	// Common standard ANSI color mappings (these are typical values)
+	// Comprehensive ANSI color mappings from various terminal emulators
 	standardColors := map[[3]int]int{
+		// Standard 16 colors - XTerm/VTE variants
 		{0, 0, 0}:       0,  // black
 		{128, 0, 0}:     1,  // red
 		{0, 128, 0}:     2,  // green
@@ -341,14 +342,107 @@ func (s *Scaffold) mapStandardColor(r, g, b int) (color.Color, bool) {
 		{255, 0, 255}:   13, // light magenta
 		{0, 255, 255}:   14, // light cyan
 		{255, 255, 255}: 15, // white
+		
+		// Alternative XTerm colors
+		{0, 0, 0}:         0,  // black
+		{205, 0, 0}:       1,  // red (xterm variant)
+		{0, 205, 0}:       2,  // green (xterm variant)
+		{205, 205, 0}:     3,  // yellow (xterm variant)
+		{0, 0, 238}:       4,  // blue (xterm variant)
+		{205, 0, 205}:     5,  // magenta (xterm variant)
+		{0, 205, 205}:     6,  // cyan (xterm variant)
+		{229, 229, 229}:   7,  // light gray (xterm variant)
+		{127, 127, 127}:   8,  // dark gray (xterm variant)
+		{255, 0, 0}:       9,  // bright red
+		{0, 255, 0}:       10, // bright green
+		{255, 255, 0}:     11, // bright yellow
+		{92, 92, 255}:     12, // bright blue (xterm variant)
+		{255, 0, 255}:     13, // bright magenta
+		{0, 255, 255}:     14, // bright cyan
+		{255, 255, 255}:   15, // white
+		
+		// iTerm2/macOS Terminal variants
+		{0, 0, 0}:         0,  // black
+		{194, 54, 33}:     1,  // red (iTerm2)
+		{37, 188, 36}:     2,  // green (iTerm2)
+		{173, 173, 39}:    3,  // yellow (iTerm2)
+		{73, 46, 225}:     4,  // blue (iTerm2)
+		{211, 56, 211}:    5,  // magenta (iTerm2)
+		{51, 187, 200}:    6,  // cyan (iTerm2)
+		{203, 204, 205}:   7,  // light gray (iTerm2)
+		{129, 131, 131}:   8,  // dark gray (iTerm2)
+		{252, 57, 31}:     9,  // bright red (iTerm2)
+		{49, 231, 34}:     10, // bright green (iTerm2)
+		{234, 236, 35}:    11, // bright yellow (iTerm2)
+		{88, 51, 255}:     12, // bright blue (iTerm2)
+		{249, 53, 248}:    13, // bright magenta (iTerm2)
+		{20, 240, 240}:    14, // bright cyan (iTerm2)
+		{233, 235, 235}:   15, // white (iTerm2)
 	}
 
+	// Try exact match first
 	if colorIndex, found := standardColors[[3]int{r, g, b}]; found {
 		if customColor, exists := s.customColors[colorIndex]; exists {
 			return customColor, true
 		}
 	}
+	
+	// Fallback: Find closest color by similarity
+	return s.findClosestColor(r, g, b)
+}
 
+// findClosestColor finds the closest ANSI color index using color distance
+func (s *Scaffold) findClosestColor(r, g, b int) (color.Color, bool) {
+	if s.customColors == nil {
+		return nil, false
+	}
+	
+	// Standard ANSI color RGB reference values (most common)
+	ansiColors := []struct {
+		r, g, b, index int
+	}{
+		{0, 0, 0, 0},         // black
+		{128, 0, 0, 1},       // red
+		{0, 128, 0, 2},       // green  
+		{128, 128, 0, 3},     // yellow
+		{0, 0, 128, 4},       // blue
+		{128, 0, 128, 5},     // magenta
+		{0, 128, 128, 6},     // cyan
+		{192, 192, 192, 7},   // light gray
+		{128, 128, 128, 8},   // dark gray
+		{255, 0, 0, 9},       // bright red
+		{0, 255, 0, 10},      // bright green
+		{255, 255, 0, 11},    // bright yellow
+		{0, 0, 255, 12},      // bright blue
+		{255, 0, 255, 13},    // bright magenta
+		{0, 255, 255, 14},    // bright cyan
+		{255, 255, 255, 15},  // white
+	}
+	
+	minDistance := int(^uint(0) >> 1) // max int
+	closestIndex := -1
+	
+	for _, ansiColor := range ansiColors {
+		// Calculate Euclidean distance in RGB space
+		dr := r - ansiColor.r
+		dg := g - ansiColor.g
+		db := b - ansiColor.b
+		distance := dr*dr + dg*dg + db*db
+		
+		if distance < minDistance {
+			minDistance = distance
+			closestIndex = ansiColor.index
+		}
+	}
+	
+	// Only use the closest color if it's reasonably close (distance < 10000)
+	// This prevents completely wrong color matches
+	if closestIndex >= 0 && minDistance < 10000 {
+		if customColor, exists := s.customColors[closestIndex]; exists {
+			return customColor, true
+		}
+	}
+	
 	return nil, false
 }
 
