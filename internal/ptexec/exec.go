@@ -174,14 +174,13 @@ func (c *PseudoTerminal) pseudoTerminal(cmd *exec.Cmd) (*os.File, error) {
 
 	size, err := pty.GetsizeFull(os.Stdout)
 	if err != nil {
-		// Obtaining terminal size is prone to error in CI systems, e.g. in
-		// GitHub Action setup or similar, so only fail if CI is not set
-		if !isCI() {
+		// Obtaining terminal size is prone to error in CI systems or when
+		// stdout is not a terminal, so use reasonable defaults
+		if !isCI() && isTerminal(os.Stdout) {
 			return nil, fmt.Errorf("failed to get size: %w", err)
 		}
 
-		// For CI systems, assume a reasonable default even if the terminal
-		// size cannot be obtained through ioctl
+		// For CI systems or non-terminal environments, assume a reasonable default
 		size = &pty.Winsize{Rows: 25, Cols: 80}
 	}
 
