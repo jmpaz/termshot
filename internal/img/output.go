@@ -70,6 +70,7 @@ type Scaffold struct {
 	columns int
 
 	defaultForegroundColor color.Color
+	defaultBackgroundColor color.Color
 	customColors           map[int]color.Color
 
 	clipCanvas bool
@@ -103,6 +104,7 @@ func NewImageCreator() Scaffold {
 
 	return Scaffold{
 		defaultForegroundColor: bunt.LightGray,
+		defaultBackgroundColor: color.RGBA{R: 0x15, G: 0x15, B: 0x15, A: 255}, // #151515
 
 		factor: f,
 
@@ -227,6 +229,25 @@ func (s *Scaffold) LoadColorscheme(colorschemeFile string) error {
 				s.customColors[i] = c
 			}
 		}
+		
+		// Apply custom foreground color if specified
+		if foregroundHex, exists := scheme.Colors["foreground"]; exists {
+			c, err := parseHexColor(foregroundHex)
+			if err != nil {
+				return fmt.Errorf("invalid foreground color %s: %w", foregroundHex, err)
+			}
+			s.defaultForegroundColor = c
+		}
+		
+		// Apply custom background color if specified
+		if backgroundHex, exists := scheme.Colors["background"]; exists {
+			c, err := parseHexColor(backgroundHex)
+			if err != nil {
+				return fmt.Errorf("invalid background color %s: %w", backgroundHex, err)
+			}
+			s.defaultBackgroundColor = c
+		}
+		
 		return nil
 	}
 
@@ -248,6 +269,24 @@ func (s *Scaffold) LoadColorscheme(colorschemeFile string) error {
 			}
 			s.customColors[i] = c
 		}
+	}
+	
+	// Apply custom foreground color if specified
+	if foregroundHex, exists := scheme.Colors["foreground"]; exists {
+		c, err := parseHexColor(foregroundHex)
+		if err != nil {
+			return fmt.Errorf("invalid foreground color %s: %w", foregroundHex, err)
+		}
+		s.defaultForegroundColor = c
+	}
+	
+	// Apply custom background color if specified
+	if backgroundHex, exists := scheme.Colors["background"]; exists {
+		c, err := parseHexColor(backgroundHex)
+		if err != nil {
+			return fmt.Errorf("invalid background color %s: %w", backgroundHex, err)
+		}
+		s.defaultBackgroundColor = c
 	}
 
 	return nil
@@ -458,7 +497,7 @@ func (s *Scaffold) image() (image.Image, error) {
 	// Draw rounded rectangle with outline to produce impression of a window
 	//
 	dc.DrawRoundedRectangle(xOffset, yOffset, width-2*marginX, height-2*marginY, corner)
-	dc.SetHexColor("#151515")
+	dc.SetColor(s.defaultBackgroundColor)
 	dc.Fill()
 
 	dc.DrawRoundedRectangle(xOffset, yOffset, width-2*marginX, height-2*marginY, corner)
