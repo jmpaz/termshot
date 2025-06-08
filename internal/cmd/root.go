@@ -76,9 +76,9 @@ window including all terminal colors and text decorations.
 			return cmd.Usage()
 		}
 
-		var scaffold = img.NewImageCreator()
+		scaffold := img.NewImageCreator()
 		var buf bytes.Buffer
-		var pt = ptexec.New()
+		pt := ptexec.New()
 
 		// Apply custom fonts if provided
 		//
@@ -161,7 +161,7 @@ window including all terminal colors and text decorations.
 
 			defer func() { _ = os.Remove(tmpFile.Name()) }()
 
-			if err := os.WriteFile(tmpFile.Name(), buf.Bytes(), os.FileMode(0644)); err != nil {
+			if err := os.WriteFile(tmpFile.Name(), buf.Bytes(), os.FileMode(0o644)); err != nil {
 				return err
 			}
 
