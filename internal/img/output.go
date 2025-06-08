@@ -21,6 +21,8 @@
 package img
 
 import (
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"image"
 	"image/color"
@@ -37,6 +39,7 @@ import (
 	"github.com/gonvenience/font"
 	"github.com/gonvenience/term"
 	imgfont "golang.org/x/image/font"
+	"golang.org/x/image/font/opentype"
 )
 
 const (
@@ -67,6 +70,7 @@ type Scaffold struct {
 	columns int
 
 	defaultForegroundColor color.Color
+	customColors           map[int]color.Color
 
 	clipCanvas bool
 
@@ -138,6 +142,176 @@ func (s *Scaffold) DrawDecorations(value bool) { s.drawDecorations = value }
 func (s *Scaffold) DrawShadow(value bool) { s.drawShadow = value }
 
 func (s *Scaffold) ClipCanvas(value bool) { s.clipCanvas = value }
+
+// LoadCustomFonts loads custom fonts from file paths, applying them in order
+func (s *Scaffold) LoadCustomFonts(fontPaths []string) error {
+	fontFaceOptions := &truetype.Options{
+		Size: s.factor * defaultFontSize,
+		DPI:  defaultFontDPI,
+	}
+
+	for i, fontPath := range fontPaths {
+		fontBytes, err := os.ReadFile(fontPath)
+		if err != nil {
+			return fmt.Errorf("failed to read font file %s: %w", fontPath, err)
+		}
+
+		var face imgfont.Face
+		if strings.HasSuffix(strings.ToLower(fontPath), ".ttf") {
+			ttfFont, err := truetype.Parse(fontBytes)
+			if err != nil {
+				return fmt.Errorf("failed to parse TTF font %s: %w", fontPath, err)
+			}
+			face = truetype.NewFace(ttfFont, fontFaceOptions)
+		} else {
+			otfFont, err := opentype.Parse(fontBytes)
+			if err != nil {
+				return fmt.Errorf("failed to parse font %s: %w", fontPath, err)
+			}
+			face, err = opentype.NewFace(otfFont, &opentype.FaceOptions{
+				Size: s.factor * defaultFontSize,
+				DPI:  defaultFontDPI,
+			})
+			if err != nil {
+				return fmt.Errorf("failed to create font face for %s: %w", fontPath, err)
+			}
+		}
+
+		// Apply fonts in order: regular, bold, italic, boldItalic
+		// If only one font is provided, use it for all variants
+		switch i % 4 {
+		case 0:
+			s.regular = face
+			// If only one font provided, use it for all variants
+			if len(fontPaths) == 1 {
+				s.bold = face
+				s.italic = face
+				s.boldItalic = face
+			}
+		case 1:
+			s.bold = face
+		case 2:
+			s.italic = face
+		case 3:
+			s.boldItalic = face
+		}
+	}
+
+	return nil
+}
+
+// LoadColorscheme loads a custom colorscheme from a JSON file
+func (s *Scaffold) LoadColorscheme(colorschemeFile string) error {
+	data, err := os.ReadFile(colorschemeFile)
+	if err != nil {
+		return fmt.Errorf("failed to read colorscheme file: %w", err)
+	}
+
+	s.customColors = make(map[int]color.Color)
+
+	// Try parsing as array first (your format)
+	var schemeArray []struct {
+		Colors map[string]string `json:"colors"`
+	}
+	
+	if err := json.Unmarshal(data, &schemeArray); err == nil && len(schemeArray) > 0 {
+		// Use first scheme in array
+		scheme := schemeArray[0]
+		for i := 0; i < 16; i++ {
+			colorKey := fmt.Sprintf("color%d", i)
+			if hexColor, exists := scheme.Colors[colorKey]; exists {
+				c, err := parseHexColor(hexColor)
+				if err != nil {
+					return fmt.Errorf("invalid color %s for %s: %w", hexColor, colorKey, err)
+				}
+				s.customColors[i] = c
+			}
+		}
+		return nil
+	}
+
+	// Try parsing as single object (simple format)
+	var scheme struct {
+		Colors map[string]string `json:"colors"`
+	}
+
+	if err := json.Unmarshal(data, &scheme); err != nil {
+		return fmt.Errorf("failed to parse colorscheme JSON: %w", err)
+	}
+
+	for i := 0; i < 16; i++ {
+		colorKey := fmt.Sprintf("color%d", i)
+		if hexColor, exists := scheme.Colors[colorKey]; exists {
+			c, err := parseHexColor(hexColor)
+			if err != nil {
+				return fmt.Errorf("invalid color %s for %s: %w", hexColor, colorKey, err)
+			}
+			s.customColors[i] = c
+		}
+	}
+
+	return nil
+}
+
+// parseHexColor converts a hex color string to color.Color
+func parseHexColor(hexStr string) (color.Color, error) {
+	hexStr = strings.TrimPrefix(hexStr, "#")
+	if len(hexStr) != 6 {
+		return nil, fmt.Errorf("hex color must be 6 characters long")
+	}
+
+	rgb, err := hex.DecodeString(hexStr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid hex color: %w", err)
+	}
+
+	return color.RGBA{R: rgb[0], G: rgb[1], B: rgb[2], A: 255}, nil
+}
+
+// getColor returns the appropriate color based on ANSI color index and custom colorscheme
+func (s *Scaffold) getColor(ansiColorIndex int, fallbackColor color.Color) color.Color {
+	if s.customColors != nil {
+		if customColor, exists := s.customColors[ansiColorIndex]; exists {
+			return customColor
+		}
+	}
+	return fallbackColor
+}
+
+// mapStandardColor attempts to map standard ANSI RGB values to custom colors
+func (s *Scaffold) mapStandardColor(r, g, b int) (color.Color, bool) {
+	if s.customColors == nil {
+		return nil, false
+	}
+
+	// Common standard ANSI color mappings (these are typical values)
+	standardColors := map[[3]int]int{
+		{0, 0, 0}:       0,  // black
+		{128, 0, 0}:     1,  // red
+		{0, 128, 0}:     2,  // green
+		{128, 128, 0}:   3,  // yellow
+		{0, 0, 128}:     4,  // blue
+		{128, 0, 128}:   5,  // magenta
+		{0, 128, 128}:   6,  // cyan
+		{192, 192, 192}: 7,  // light gray
+		{128, 128, 128}: 8,  // dark gray
+		{255, 0, 0}:     9,  // light red
+		{0, 255, 0}:     10, // light green
+		{255, 255, 0}:   11, // light yellow
+		{0, 0, 255}:     12, // light blue
+		{255, 0, 255}:   13, // light magenta
+		{0, 255, 255}:   14, // light cyan
+		{255, 255, 255}: 15, // white
+	}
+
+	if colorIndex, found := standardColors[[3]int{r, g, b}]; found {
+		if customColor, exists := s.customColors[colorIndex]; exists {
+			return customColor, true
+		}
+	}
+
+	return nil, false
+}
 
 func (s *Scaffold) GetFixedColumns() int {
 	if s.columns != 0 {
@@ -327,11 +501,15 @@ func (s *Scaffold) image() (image.Image, error) {
 		// background color
 		switch cr.Settings & 0x02 { //nolint:gocritic
 		case 2:
-			dc.SetRGB255(
-				int((cr.Settings>>32)&0xFF), // #nosec G115
-				int((cr.Settings>>40)&0xFF), // #nosec G115
-				int((cr.Settings>>48)&0xFF), // #nosec G115
-			)
+			r := int((cr.Settings>>32)&0xFF) // #nosec G115
+			g := int((cr.Settings>>40)&0xFF) // #nosec G115
+			b := int((cr.Settings>>48)&0xFF) // #nosec G115
+			
+			if customColor, found := s.mapStandardColor(r, g, b); found {
+				dc.SetColor(customColor)
+			} else {
+				dc.SetRGB255(r, g, b)
+			}
 
 			dc.DrawRectangle(x, y-h+12, w, h)
 			dc.Fill()
@@ -340,11 +518,15 @@ func (s *Scaffold) image() (image.Image, error) {
 		// foreground color
 		switch cr.Settings & 0x01 {
 		case 1:
-			dc.SetRGB255(
-				int((cr.Settings>>8)&0xFF),  // #nosec G115
-				int((cr.Settings>>16)&0xFF), // #nosec G115
-				int((cr.Settings>>24)&0xFF), // #nosec G115
-			)
+			r := int((cr.Settings>>8)&0xFF)  // #nosec G115
+			g := int((cr.Settings>>16)&0xFF) // #nosec G115
+			b := int((cr.Settings>>24)&0xFF) // #nosec G115
+			
+			if customColor, found := s.mapStandardColor(r, g, b); found {
+				dc.SetColor(customColor)
+			} else {
+				dc.SetRGB255(r, g, b)
+			}
 
 		default:
 			dc.SetColor(s.defaultForegroundColor)
