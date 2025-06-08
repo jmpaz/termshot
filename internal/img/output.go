@@ -21,6 +21,8 @@
 package img
 
 import (
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"image"
 	"image/color"
@@ -37,6 +39,7 @@ import (
 	"github.com/gonvenience/font"
 	"github.com/gonvenience/term"
 	imgfont "golang.org/x/image/font"
+	"golang.org/x/image/font/opentype"
 )
 
 const (
@@ -67,6 +70,8 @@ type Scaffold struct {
 	columns int
 
 	defaultForegroundColor color.Color
+	defaultBackgroundColor color.Color
+	customColors           map[int]color.Color
 
 	clipCanvas bool
 
@@ -99,6 +104,7 @@ func NewImageCreator() Scaffold {
 
 	return Scaffold{
 		defaultForegroundColor: bunt.LightGray,
+		defaultBackgroundColor: color.RGBA{R: 0x15, G: 0x15, B: 0x15, A: 255}, // #151515
 
 		factor: f,
 
@@ -138,6 +144,307 @@ func (s *Scaffold) DrawDecorations(value bool) { s.drawDecorations = value }
 func (s *Scaffold) DrawShadow(value bool) { s.drawShadow = value }
 
 func (s *Scaffold) ClipCanvas(value bool) { s.clipCanvas = value }
+
+// LoadCustomFonts loads custom fonts from file paths, applying them in order
+func (s *Scaffold) LoadCustomFonts(fontPaths []string) error {
+	fontFaceOptions := &truetype.Options{
+		Size: s.factor * defaultFontSize,
+		DPI:  defaultFontDPI,
+	}
+
+	for i, fontPath := range fontPaths {
+		fontBytes, err := os.ReadFile(fontPath)
+		if err != nil {
+			return fmt.Errorf("failed to read font file %s: %w", fontPath, err)
+		}
+
+		var face imgfont.Face
+		if strings.HasSuffix(strings.ToLower(fontPath), ".ttf") {
+			ttfFont, err := truetype.Parse(fontBytes)
+			if err != nil {
+				return fmt.Errorf("failed to parse TTF font %s: %w", fontPath, err)
+			}
+			face = truetype.NewFace(ttfFont, fontFaceOptions)
+		} else {
+			otfFont, err := opentype.Parse(fontBytes)
+			if err != nil {
+				return fmt.Errorf("failed to parse font %s: %w", fontPath, err)
+			}
+			face, err = opentype.NewFace(otfFont, &opentype.FaceOptions{
+				Size: s.factor * defaultFontSize,
+				DPI:  defaultFontDPI,
+			})
+			if err != nil {
+				return fmt.Errorf("failed to create font face for %s: %w", fontPath, err)
+			}
+		}
+
+		// Apply fonts in order: regular, bold, italic, boldItalic
+		// If only one font is provided, use it for all variants
+		switch i % 4 {
+		case 0:
+			s.regular = face
+			// If only one font provided, use it for all variants
+			if len(fontPaths) == 1 {
+				s.bold = face
+				s.italic = face
+				s.boldItalic = face
+			}
+		case 1:
+			s.bold = face
+		case 2:
+			s.italic = face
+		case 3:
+			s.boldItalic = face
+		}
+	}
+
+	return nil
+}
+
+// LoadColorscheme loads a custom colorscheme from a JSON file
+func (s *Scaffold) LoadColorscheme(colorschemeFile string) error {
+	data, err := os.ReadFile(colorschemeFile)
+	if err != nil {
+		return fmt.Errorf("failed to read colorscheme file: %w", err)
+	}
+
+	s.customColors = make(map[int]color.Color)
+
+	// Try parsing as array first (your format)
+	var schemeArray []struct {
+		Colors map[string]string `json:"colors"`
+	}
+
+	if err := json.Unmarshal(data, &schemeArray); err == nil && len(schemeArray) > 0 {
+		// Use first scheme in array
+		scheme := schemeArray[0]
+		for i := 0; i < 16; i++ {
+			colorKey := fmt.Sprintf("color%d", i)
+			if hexColor, exists := scheme.Colors[colorKey]; exists {
+				c, err := parseHexColor(hexColor)
+				if err != nil {
+					return fmt.Errorf("invalid color %s for %s: %w", hexColor, colorKey, err)
+				}
+				s.customColors[i] = c
+			}
+		}
+
+		// Apply custom foreground color if specified
+		if foregroundHex, exists := scheme.Colors["foreground"]; exists {
+			c, err := parseHexColor(foregroundHex)
+			if err != nil {
+				return fmt.Errorf("invalid foreground color %s: %w", foregroundHex, err)
+			}
+			s.defaultForegroundColor = c
+		}
+
+		// Apply custom background color if specified
+		if backgroundHex, exists := scheme.Colors["background"]; exists {
+			c, err := parseHexColor(backgroundHex)
+			if err != nil {
+				return fmt.Errorf("invalid background color %s: %w", backgroundHex, err)
+			}
+			s.defaultBackgroundColor = c
+		}
+
+		return nil
+	}
+
+	// Try parsing as single object (simple format)
+	var scheme struct {
+		Colors map[string]string `json:"colors"`
+	}
+
+	if err := json.Unmarshal(data, &scheme); err != nil {
+		return fmt.Errorf("failed to parse colorscheme JSON: %w", err)
+	}
+
+	for i := 0; i < 16; i++ {
+		colorKey := fmt.Sprintf("color%d", i)
+		if hexColor, exists := scheme.Colors[colorKey]; exists {
+			c, err := parseHexColor(hexColor)
+			if err != nil {
+				return fmt.Errorf("invalid color %s for %s: %w", hexColor, colorKey, err)
+			}
+			s.customColors[i] = c
+		}
+	}
+
+	// Apply custom foreground color if specified
+	if foregroundHex, exists := scheme.Colors["foreground"]; exists {
+		c, err := parseHexColor(foregroundHex)
+		if err != nil {
+			return fmt.Errorf("invalid foreground color %s: %w", foregroundHex, err)
+		}
+		s.defaultForegroundColor = c
+	}
+
+	// Apply custom background color if specified
+	if backgroundHex, exists := scheme.Colors["background"]; exists {
+		c, err := parseHexColor(backgroundHex)
+		if err != nil {
+			return fmt.Errorf("invalid background color %s: %w", backgroundHex, err)
+		}
+		s.defaultBackgroundColor = c
+	}
+
+	return nil
+}
+
+// parseHexColor converts a hex color string to color.Color
+func parseHexColor(hexStr string) (color.Color, error) {
+	hexStr = strings.TrimPrefix(hexStr, "#")
+	if len(hexStr) != 6 {
+		return nil, fmt.Errorf("hex color must be 6 characters long")
+	}
+
+	rgb, err := hex.DecodeString(hexStr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid hex color: %w", err)
+	}
+
+	return color.RGBA{R: rgb[0], G: rgb[1], B: rgb[2], A: 255}, nil
+}
+
+// getColor returns the appropriate color based on ANSI color index and custom colorscheme
+func (s *Scaffold) getColor(ansiColorIndex int, fallbackColor color.Color) color.Color {
+	if s.customColors != nil {
+		if customColor, exists := s.customColors[ansiColorIndex]; exists {
+			return customColor
+		}
+	}
+	return fallbackColor
+}
+
+// mapStandardColor attempts to map standard ANSI RGB values to custom colors
+func (s *Scaffold) mapStandardColor(r, g, b int) (color.Color, bool) {
+	if s.customColors == nil {
+		return nil, false
+	}
+
+	// Comprehensive ANSI color mappings from various terminal emulators
+	standardColors := map[[3]int]int{
+		// Standard 16 colors - XTerm/VTE variants
+		{0, 0, 0}:       0,  // black
+		{128, 0, 0}:     1,  // red
+		{0, 128, 0}:     2,  // green
+		{128, 128, 0}:   3,  // yellow
+		{0, 0, 128}:     4,  // blue
+		{128, 0, 128}:   5,  // magenta
+		{0, 128, 128}:   6,  // cyan
+		{192, 192, 192}: 7,  // light gray
+		{128, 128, 128}: 8,  // dark gray
+		{255, 0, 0}:     9,  // light red
+		{0, 255, 0}:     10, // light green
+		{255, 255, 0}:   11, // light yellow
+		{0, 0, 255}:     12, // light blue
+		{255, 0, 255}:   13, // light magenta
+		{0, 255, 255}:   14, // light cyan
+		{255, 255, 255}: 15, // white
+
+		// Alternative XTerm colors
+		{0, 0, 0}:       0,  // black
+		{205, 0, 0}:     1,  // red (xterm variant)
+		{0, 205, 0}:     2,  // green (xterm variant)
+		{205, 205, 0}:   3,  // yellow (xterm variant)
+		{0, 0, 238}:     4,  // blue (xterm variant)
+		{205, 0, 205}:   5,  // magenta (xterm variant)
+		{0, 205, 205}:   6,  // cyan (xterm variant)
+		{229, 229, 229}: 7,  // light gray (xterm variant)
+		{127, 127, 127}: 8,  // dark gray (xterm variant)
+		{255, 0, 0}:     9,  // bright red
+		{0, 255, 0}:     10, // bright green
+		{255, 255, 0}:   11, // bright yellow
+		{92, 92, 255}:   12, // bright blue (xterm variant)
+		{255, 0, 255}:   13, // bright magenta
+		{0, 255, 255}:   14, // bright cyan
+		{255, 255, 255}: 15, // white
+
+		// iTerm2/macOS Terminal variants
+		{0, 0, 0}:       0,  // black
+		{194, 54, 33}:   1,  // red (iTerm2)
+		{37, 188, 36}:   2,  // green (iTerm2)
+		{173, 173, 39}:  3,  // yellow (iTerm2)
+		{73, 46, 225}:   4,  // blue (iTerm2)
+		{211, 56, 211}:  5,  // magenta (iTerm2)
+		{51, 187, 200}:  6,  // cyan (iTerm2)
+		{203, 204, 205}: 7,  // light gray (iTerm2)
+		{129, 131, 131}: 8,  // dark gray (iTerm2)
+		{252, 57, 31}:   9,  // bright red (iTerm2)
+		{49, 231, 34}:   10, // bright green (iTerm2)
+		{234, 236, 35}:  11, // bright yellow (iTerm2)
+		{88, 51, 255}:   12, // bright blue (iTerm2)
+		{249, 53, 248}:  13, // bright magenta (iTerm2)
+		{20, 240, 240}:  14, // bright cyan (iTerm2)
+		{233, 235, 235}: 15, // white (iTerm2)
+	}
+
+	// Try exact match first
+	if colorIndex, found := standardColors[[3]int{r, g, b}]; found {
+		if customColor, exists := s.customColors[colorIndex]; exists {
+			return customColor, true
+		}
+	}
+
+	// Fallback: Find closest color by similarity
+	return s.findClosestColor(r, g, b)
+}
+
+// findClosestColor finds the closest ANSI color index using color distance
+func (s *Scaffold) findClosestColor(r, g, b int) (color.Color, bool) {
+	if s.customColors == nil {
+		return nil, false
+	}
+
+	// Standard ANSI color RGB reference values (most common)
+	ansiColors := []struct {
+		r, g, b, index int
+	}{
+		{0, 0, 0, 0},        // black
+		{128, 0, 0, 1},      // red
+		{0, 128, 0, 2},      // green
+		{128, 128, 0, 3},    // yellow
+		{0, 0, 128, 4},      // blue
+		{128, 0, 128, 5},    // magenta
+		{0, 128, 128, 6},    // cyan
+		{192, 192, 192, 7},  // light gray
+		{128, 128, 128, 8},  // dark gray
+		{255, 0, 0, 9},      // bright red
+		{0, 255, 0, 10},     // bright green
+		{255, 255, 0, 11},   // bright yellow
+		{0, 0, 255, 12},     // bright blue
+		{255, 0, 255, 13},   // bright magenta
+		{0, 255, 255, 14},   // bright cyan
+		{255, 255, 255, 15}, // white
+	}
+
+	minDistance := int(^uint(0) >> 1) // max int
+	closestIndex := -1
+
+	for _, ansiColor := range ansiColors {
+		// Calculate Euclidean distance in RGB space
+		dr := r - ansiColor.r
+		dg := g - ansiColor.g
+		db := b - ansiColor.b
+		distance := dr*dr + dg*dg + db*db
+
+		if distance < minDistance {
+			minDistance = distance
+			closestIndex = ansiColor.index
+		}
+	}
+
+	// Only use the closest color if it's reasonably close (distance < 10000)
+	// This prevents completely wrong color matches
+	if closestIndex >= 0 && minDistance < 10000 {
+		if customColor, exists := s.customColors[closestIndex]; exists {
+			return customColor, true
+		}
+	}
+
+	return nil, false
+}
 
 func (s *Scaffold) GetFixedColumns() int {
 	if s.columns != 0 {
@@ -195,7 +502,7 @@ func (s *Scaffold) fontHeight() float64 {
 }
 
 func (s *Scaffold) measureContent() (width float64, height float64) {
-	var tmp = make([]rune, len(s.content))
+	tmp := make([]rune, len(s.content))
 	for i, cr := range s.content {
 		tmp[i] = cr.Symbol
 	}
@@ -232,7 +539,7 @@ func (s *Scaffold) measureContent() (width float64, height float64) {
 }
 
 func (s *Scaffold) image() (image.Image, error) {
-	var f = func(value float64) float64 { return s.factor * value }
+	f := func(value float64) float64 { return s.factor * value }
 
 	var (
 		corner   = f(6)
@@ -284,7 +591,7 @@ func (s *Scaffold) image() (image.Image, error) {
 	// Draw rounded rectangle with outline to produce impression of a window
 	//
 	dc.DrawRoundedRectangle(xOffset, yOffset, width-2*marginX, height-2*marginY, corner)
-	dc.SetHexColor("#151515")
+	dc.SetColor(s.defaultBackgroundColor)
 	dc.Fill()
 
 	dc.DrawRoundedRectangle(xOffset, yOffset, width-2*marginX, height-2*marginY, corner)
@@ -305,7 +612,7 @@ func (s *Scaffold) image() (image.Image, error) {
 
 	// Apply the actual text into the prepared content area of the window
 	//
-	var x, y = xOffset + paddingX, yOffset + paddingY + titleOffset + s.fontHeight()
+	x, y := xOffset+paddingX, yOffset+paddingY+titleOffset+s.fontHeight()
 	for _, cr := range s.content {
 		switch cr.Settings & 0x1C {
 		case 4:
@@ -327,11 +634,15 @@ func (s *Scaffold) image() (image.Image, error) {
 		// background color
 		switch cr.Settings & 0x02 { //nolint:gocritic
 		case 2:
-			dc.SetRGB255(
-				int((cr.Settings>>32)&0xFF), // #nosec G115
-				int((cr.Settings>>40)&0xFF), // #nosec G115
-				int((cr.Settings>>48)&0xFF), // #nosec G115
-			)
+			r := int((cr.Settings >> 32) & 0xFF) // #nosec G115
+			g := int((cr.Settings >> 40) & 0xFF) // #nosec G115
+			b := int((cr.Settings >> 48) & 0xFF) // #nosec G115
+
+			if customColor, found := s.mapStandardColor(r, g, b); found {
+				dc.SetColor(customColor)
+			} else {
+				dc.SetRGB255(r, g, b)
+			}
 
 			dc.DrawRectangle(x, y-h+12, w, h)
 			dc.Fill()
@@ -340,11 +651,15 @@ func (s *Scaffold) image() (image.Image, error) {
 		// foreground color
 		switch cr.Settings & 0x01 {
 		case 1:
-			dc.SetRGB255(
-				int((cr.Settings>>8)&0xFF),  // #nosec G115
-				int((cr.Settings>>16)&0xFF), // #nosec G115
-				int((cr.Settings>>24)&0xFF), // #nosec G115
-			)
+			r := int((cr.Settings >> 8) & 0xFF)  // #nosec G115
+			g := int((cr.Settings >> 16) & 0xFF) // #nosec G115
+			b := int((cr.Settings >> 24) & 0xFF) // #nosec G115
+
+			if customColor, found := s.mapStandardColor(r, g, b); found {
+				dc.SetColor(customColor)
+			} else {
+				dc.SetRGB255(r, g, b)
+			}
 
 		default:
 			dc.SetColor(s.defaultForegroundColor)
@@ -398,10 +713,10 @@ func (s *Scaffold) WritePNG(w io.Writer) error {
 	//
 	if s.clipCanvas {
 		if imgRGBA, ok := img.(*image.RGBA); ok {
-			var minX, minY = math.MaxInt, math.MaxInt
-			var maxX, maxY = 0, 0
+			minX, minY := math.MaxInt, math.MaxInt
+			maxX, maxY := 0, 0
 
-			var bounds = imgRGBA.Bounds()
+			bounds := imgRGBA.Bounds()
 			for x := bounds.Min.X; x < bounds.Max.X; x++ {
 				for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
 					r, g, b, a := imgRGBA.At(x, y).RGBA()

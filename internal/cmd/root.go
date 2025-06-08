@@ -76,9 +76,25 @@ window including all terminal colors and text decorations.
 			return cmd.Usage()
 		}
 
-		var scaffold = img.NewImageCreator()
+		scaffold := img.NewImageCreator()
 		var buf bytes.Buffer
-		var pt = ptexec.New()
+		pt := ptexec.New()
+
+		// Apply custom fonts if provided
+		//
+		if fonts, err := cmd.Flags().GetStringSlice("font"); err == nil && len(fonts) > 0 {
+			if err := scaffold.LoadCustomFonts(fonts); err != nil {
+				return fmt.Errorf("failed to load custom fonts: %w", err)
+			}
+		}
+
+		// Apply custom colorscheme if provided
+		//
+		if colorscheme, err := cmd.Flags().GetString("colorscheme"); err == nil && colorscheme != "" {
+			if err := scaffold.LoadColorscheme(colorscheme); err != nil {
+				return fmt.Errorf("failed to load colorscheme: %w", err)
+			}
+		}
 
 		// Initialise scaffold with a column sizing so that the
 		// content can be wrapped accordingly
@@ -145,7 +161,7 @@ window including all terminal colors and text decorations.
 
 			defer func() { _ = os.Remove(tmpFile.Name()) }()
 
-			if err := os.WriteFile(tmpFile.Name(), buf.Bytes(), os.FileMode(0644)); err != nil {
+			if err := os.WriteFile(tmpFile.Name(), buf.Bytes(), os.FileMode(0o644)); err != nil {
 				return err
 			}
 
@@ -291,6 +307,8 @@ func init() {
 	rootCmd.Flags().Bool("no-decoration", false, "do not draw window decorations")
 	rootCmd.Flags().Bool("no-shadow", false, "do not draw window shadow")
 	rootCmd.Flags().BoolP("clip-canvas", "s", false, "clip canvas to visible image area (no margin)")
+	rootCmd.Flags().StringSlice("font", nil, "custom font files (TTF/OTF) to use instead of default Hack font")
+	rootCmd.Flags().String("colorscheme", "", "JSON file with custom color scheme (color0-color15)")
 
 	// flags for output related settings
 	rootCmd.Flags().StringP("filename", "f", "out.png", "filename of the screenshot")
