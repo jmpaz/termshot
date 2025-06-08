@@ -83,8 +83,15 @@ type Scaffold struct {
 	shadowOffsetX   float64
 	shadowOffsetY   float64
 
-	padding float64
-	margin  float64
+	paddingTop    float64
+	paddingRight  float64
+	paddingBottom float64
+	paddingLeft   float64
+	drawBorder    bool
+	marginTop     float64
+	marginRight   float64
+	marginBottom  float64
+	marginLeft    float64
 
 	regular     imgfont.Face
 	bold        imgfont.Face
@@ -108,8 +115,17 @@ func NewImageCreator() Scaffold {
 
 		factor: f,
 
-		margin:  f * 48,
-		padding: f * 24,
+		marginTop:    f * 48,
+		marginRight:  f * 48,
+		marginBottom: f * 48,
+		marginLeft:   f * 48,
+
+		paddingTop:    f * 24,
+		paddingRight:  f * 24,
+		paddingBottom: f * 24,
+		paddingLeft:   f * 24,
+
+		drawBorder: true,
 
 		drawDecorations: true,
 		drawShadow:      true,
@@ -144,6 +160,42 @@ func (s *Scaffold) DrawDecorations(value bool) { s.drawDecorations = value }
 func (s *Scaffold) DrawShadow(value bool) { s.drawShadow = value }
 
 func (s *Scaffold) ClipCanvas(value bool) { s.clipCanvas = value }
+
+func (s *Scaffold) DrawBorder(value bool) { s.drawBorder = value }
+
+func (s *Scaffold) SetPadding(top, right, bottom, left float64) {
+	s.paddingTop = s.factor * top
+	s.paddingRight = s.factor * right
+	s.paddingBottom = s.factor * bottom
+	s.paddingLeft = s.factor * left
+}
+
+func (s *Scaffold) SetMargin(top, right, bottom, left float64) {
+	s.marginTop = s.factor * top
+	s.marginRight = s.factor * right
+	s.marginBottom = s.factor * bottom
+	s.marginLeft = s.factor * left
+}
+
+func (s *Scaffold) SetHorizontalPadding(value float64) {
+	s.paddingLeft = s.factor * value
+	s.paddingRight = s.factor * value
+}
+
+func (s *Scaffold) SetVerticalPadding(value float64) {
+	s.paddingTop = s.factor * value
+	s.paddingBottom = s.factor * value
+}
+
+func (s *Scaffold) SetHorizontalMargin(value float64) {
+	s.marginLeft = s.factor * value
+	s.marginRight = s.factor * value
+}
+
+func (s *Scaffold) SetVerticalMargin(value float64) {
+	s.marginTop = s.factor * value
+	s.marginBottom = s.factor * value
+}
 
 // LoadCustomFonts loads custom fonts from file paths, applying them in order
 func (s *Scaffold) LoadCustomFonts(fontPaths []string) error {
@@ -553,19 +605,22 @@ func (s *Scaffold) image() (image.Image, error) {
 	// content will be rendered
 	contentWidth = math.Max(contentWidth, 3*distance+3*radius)
 
-	marginX, marginY := s.margin, s.margin
-	paddingX, paddingY := s.padding, s.padding
+	marginTop, marginRight, marginBottom, marginLeft := s.marginTop, s.marginRight, s.marginBottom, s.marginLeft
+	paddingTop, paddingRight, paddingBottom, paddingLeft := s.paddingTop, s.paddingRight, s.paddingBottom, s.paddingLeft
 
-	xOffset := marginX
-	yOffset := marginY
+	xOffset := marginLeft
+	yOffset := marginTop
 
 	var titleOffset float64
 	if s.drawDecorations {
 		titleOffset = f(40)
 	}
 
-	width := contentWidth + 2*marginX + 2*paddingX
-	height := contentHeight + 2*marginY + 2*paddingY + titleOffset
+	innerWidth := contentWidth + paddingLeft + paddingRight
+	innerHeight := contentHeight + paddingTop + paddingBottom + titleOffset
+
+	width := innerWidth + marginLeft + marginRight
+	height := innerHeight + marginTop + marginBottom
 
 	dc := gg.NewContext(int(width), int(height))
 
@@ -576,7 +631,7 @@ func (s *Scaffold) image() (image.Image, error) {
 		yOffset -= s.shadowOffsetY / 2
 
 		bc := gg.NewContext(int(width), int(height))
-		bc.DrawRoundedRectangle(xOffset+s.shadowOffsetX, yOffset+s.shadowOffsetY, width-2*marginX, height-2*marginY, corner)
+		bc.DrawRoundedRectangle(xOffset+s.shadowOffsetX, yOffset+s.shadowOffsetY, innerWidth, innerHeight, corner)
 		bc.SetHexColor(s.shadowBaseColor)
 		bc.Fill()
 
@@ -590,21 +645,23 @@ func (s *Scaffold) image() (image.Image, error) {
 
 	// Draw rounded rectangle with outline to produce impression of a window
 	//
-	dc.DrawRoundedRectangle(xOffset, yOffset, width-2*marginX, height-2*marginY, corner)
+	dc.DrawRoundedRectangle(xOffset, yOffset, innerWidth, innerHeight, corner)
 	dc.SetColor(s.defaultBackgroundColor)
 	dc.Fill()
 
-	dc.DrawRoundedRectangle(xOffset, yOffset, width-2*marginX, height-2*marginY, corner)
-	dc.SetHexColor("#404040")
-	dc.SetLineWidth(f(1))
-	dc.Stroke()
+	if s.drawBorder {
+		dc.DrawRoundedRectangle(xOffset, yOffset, innerWidth, innerHeight, corner)
+		dc.SetHexColor("#404040")
+		dc.SetLineWidth(f(1))
+		dc.Stroke()
+	}
 
 	// Optional: Draw window decorations (i.e. three buttons) to produce the
 	// impression of an actional window
 	//
 	if s.drawDecorations {
 		for i, color := range []string{red, yellow, green} {
-			dc.DrawCircle(xOffset+paddingX+float64(i)*distance+f(4), yOffset+paddingY+f(4), radius)
+			dc.DrawCircle(xOffset+paddingLeft+float64(i)*distance+f(4), yOffset+paddingTop+f(4), radius)
 			dc.SetHexColor(color)
 			dc.Fill()
 		}
@@ -612,7 +669,7 @@ func (s *Scaffold) image() (image.Image, error) {
 
 	// Apply the actual text into the prepared content area of the window
 	//
-	x, y := xOffset+paddingX, yOffset+paddingY+titleOffset+s.fontHeight()
+	x, y := xOffset+paddingLeft, yOffset+paddingTop+titleOffset+s.fontHeight()
 	for _, cr := range s.content {
 		switch cr.Settings & 0x1C {
 		case 4:
@@ -667,7 +724,7 @@ func (s *Scaffold) image() (image.Image, error) {
 
 		switch str {
 		case "\n":
-			x = xOffset + paddingX
+			x = xOffset + paddingLeft
 			y += h * s.lineSpacing
 			continue
 
