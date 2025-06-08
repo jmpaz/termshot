@@ -26,6 +26,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/gonvenience/bunt"
@@ -104,6 +105,26 @@ window including all terminal colors and text decorations.
 			pt.Cols(uint16(columns))
 		}
 
+		if cmd.Flags().Changed("padding") {
+			if val, err := cmd.Flags().GetString("padding"); err == nil {
+				top, right, bottom, left, err := parseBox(val)
+				if err != nil {
+					return fmt.Errorf("invalid padding: %w", err)
+				}
+				scaffold.SetPadding(top, right, bottom, left)
+			}
+		}
+
+		if cmd.Flags().Changed("margin") {
+			if val, err := cmd.Flags().GetString("margin"); err == nil {
+				top, right, bottom, left, err := parseBox(val)
+				if err != nil {
+					return fmt.Errorf("invalid margin: %w", err)
+				}
+				scaffold.SetMargin(top, right, bottom, left)
+			}
+		}
+
 		// Disable window shadow if requested
 		//
 		if val, err := cmd.Flags().GetBool("no-shadow"); err == nil {
@@ -112,8 +133,13 @@ window including all terminal colors and text decorations.
 
 		// Disable window decorations (buttons) if requested
 		//
+
 		if val, err := cmd.Flags().GetBool("no-decoration"); err == nil {
 			scaffold.DrawDecorations(!val)
+		}
+
+		if val, err := cmd.Flags().GetBool("no-border"); err == nil {
+			scaffold.DrawBorder(!val)
 		}
 
 		// Configure that canvas is clipped at the end
@@ -295,6 +321,43 @@ func readFile(name string) ([]byte, error) {
 	}
 }
 
+func parseBox(raw string) (top, right, bottom, left float64, err error) {
+	parts := strings.Split(raw, ",")
+	vals := make([]float64, 0, len(parts))
+	for _, p := range parts {
+		if p == "" {
+			continue
+		}
+		v, convErr := strconv.ParseFloat(strings.TrimSpace(p), 64)
+		if convErr != nil {
+			return 0, 0, 0, 0, convErr
+		}
+		vals = append(vals, v)
+	}
+
+	switch len(vals) {
+	case 1:
+		top = vals[0]
+		right = vals[0]
+		bottom = vals[0]
+		left = vals[0]
+	case 2:
+		top = vals[0]
+		right = vals[1]
+		bottom = vals[0]
+		left = vals[1]
+	case 4:
+		top = vals[0]
+		right = vals[1]
+		bottom = vals[2]
+		left = vals[3]
+	default:
+		err = fmt.Errorf("expected 1, 2, or 4 values")
+	}
+
+	return
+}
+
 func init() {
 	rootCmd.Flags().SortFlags = false
 
@@ -306,6 +369,9 @@ func init() {
 	rootCmd.Flags().IntP("columns", "C", 0, "force fixed number of columns in screenshot")
 	rootCmd.Flags().Bool("no-decoration", false, "do not draw window decorations")
 	rootCmd.Flags().Bool("no-shadow", false, "do not draw window shadow")
+	rootCmd.Flags().Bool("no-border", false, "do not draw outer window border")
+	rootCmd.Flags().String("padding", "", "set padding in pixels (t,r,b,l)")
+	rootCmd.Flags().String("margin", "", "set margin in pixels (t,r,b,l)")
 	rootCmd.Flags().BoolP("clip-canvas", "s", false, "clip canvas to visible image area (no margin)")
 	rootCmd.Flags().StringSlice("font", nil, "custom font files (TTF/OTF) to use instead of default Hack font")
 	rootCmd.Flags().String("colorscheme", "", "JSON file with custom color scheme (color0-color15)")

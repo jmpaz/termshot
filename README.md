@@ -73,6 +73,18 @@ Do not draw window decorations (minimize, maximize, and close button).
 
 Do not draw window shadow.
 
+#### `--no-border`
+
+Do not draw the window border.
+
+#### `--padding`
+
+Set padding around the window in pixels. Accepts one, two, or four comma-separated values (top,right,bottom,left).
+
+#### `--margin`
+
+Set margin around the window in pixels. Accepts one, two, or four comma-separated values (top,right,bottom,left).
+
 ### Flags for output related settings
 
 #### `--clipboard`/`-b` (only on selected platforms)
